@@ -1,6 +1,13 @@
 @echo off
 title Twitter AI Filter Backend
-color 0A
+color 0E
+echo.
+echo      /^\/^\
+echo    _│ O  O │_      FILTRIUM AI
+echo   (==  ^T  ==)     Local Content Filter
+echo    \   U  /      
+echo     \____/
+echo.
 echo ===================================================
 echo      Filtrium is Starting
 echo ===================================================
