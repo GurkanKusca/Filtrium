@@ -12,6 +12,14 @@ const backendStatusDiv = document.getElementById("backendStatus");
 const statusText = document.getElementById("statusText");
 const statusDot = backendStatusDiv.querySelector('.dot');
 
+// SVG template - defined once, cloned when needed
+const TRASH_SVG = `
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="3 6 5 6 21 6"></polyline>
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+  </svg>
+`;
+
 let filters = []; 
 
 function applyTheme() {
@@ -100,9 +108,16 @@ function addFilter() {
   const exists = filters.some(f => f.term === value);
   
   if (value && !exists) {
-
-    filters.push({ term: value, level: 'normal' });
-    renderFilters();
+    const newFilter = { term: value, level: 'normal' };
+    filters.push(newFilter);
+    
+    // Incremental update: append single item instead of full re-render
+    if (filters.length === 1) {
+      // First filter - clear empty state and add
+      list.innerHTML = "";
+    }
+    appendFilterItem(newFilter, filters.length - 1);
+    filterCountDiv.textContent = filters.length;
     input.value = "";
   }
 }
@@ -121,78 +136,87 @@ function renderFilters() {
     return;
   }
 
+  // Use DocumentFragment for batch DOM insertion
+  const fragment = document.createDocumentFragment();
   filters.forEach((f, i) => {
-    const li = document.createElement("li");
-    
-
-    const infoDiv = document.createElement("div");
-    infoDiv.className = "filter-info";
-    
-    const nameSpan = document.createElement("span");
-    nameSpan.className = "filter-name";
-    nameSpan.textContent = f.term;
-    infoDiv.appendChild(nameSpan);
-    
-
-    const controlsDiv = document.createElement("div");
-    controlsDiv.className = "controls";
-    
-
-    const sliderContainer = document.createElement("div");
-    sliderContainer.className = "slider-container";
-    
-
-    const slider = document.createElement("input");
-    slider.type = "range";
-    slider.min = "1";
-    slider.max = "3";
-    slider.step = "1";
-    
-
-    if (f.level === 'low') slider.value = 1;
-    else if (f.level === 'high') slider.value = 3;
-    else slider.value = 2; 
-
-    const label = document.createElement("div");
-    label.className = "level-label";
-    label.textContent = f.level;
-    updateLabelStyle(label, f.level); 
-
-
-    slider.oninput = (e) => {
-        const val = parseInt(e.target.value);
-        if (val === 1) f.level = 'low';
-        else if (val === 3) f.level = 'high';
-        else f.level = 'normal';
-        
-        label.textContent = f.level;
-        updateLabelStyle(label, f.level);
-    };
-
-    sliderContainer.appendChild(slider);
-    sliderContainer.appendChild(label);
-
-
-    const removeBtn = document.createElement("button");
-    removeBtn.className = "remove-btn";
-    removeBtn.innerHTML = `
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="3 6 5 6 21 6"></polyline>
-        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-      </svg>
-    `;
-    removeBtn.onclick = () => {
-      filters.splice(i, 1);
-      renderFilters();
-    };
-
-    controlsDiv.appendChild(sliderContainer);
-    controlsDiv.appendChild(removeBtn);
-    
-    li.appendChild(infoDiv);
-    li.appendChild(controlsDiv);
-    list.appendChild(li);
+    fragment.appendChild(createFilterItem(f, i));
   });
+  list.appendChild(fragment);
+}
+
+// Append single filter item (for incremental add)
+function appendFilterItem(f, index) {
+  list.appendChild(createFilterItem(f, index));
+}
+
+// Create a single filter list item
+function createFilterItem(f, i) {
+  const li = document.createElement("li");
+  li.dataset.index = i;
+
+  const infoDiv = document.createElement("div");
+  infoDiv.className = "filter-info";
+  
+  const nameSpan = document.createElement("span");
+  nameSpan.className = "filter-name";
+  nameSpan.textContent = f.term;
+  infoDiv.appendChild(nameSpan);
+  
+
+  const controlsDiv = document.createElement("div");
+  controlsDiv.className = "controls";
+  
+
+  const sliderContainer = document.createElement("div");
+  sliderContainer.className = "slider-container";
+  
+
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.min = "1";
+  slider.max = "3";
+  slider.step = "1";
+  
+
+  if (f.level === 'low') slider.value = 1;
+  else if (f.level === 'high') slider.value = 3;
+  else slider.value = 2; 
+
+  const label = document.createElement("div");
+  label.className = "level-label";
+  label.textContent = f.level;
+  updateLabelStyle(label, f.level); 
+
+
+  slider.oninput = (e) => {
+      const val = parseInt(e.target.value);
+      if (val === 1) f.level = 'low';
+      else if (val === 3) f.level = 'high';
+      else f.level = 'normal';
+      
+      label.textContent = f.level;
+      updateLabelStyle(label, f.level);
+  };
+
+  sliderContainer.appendChild(slider);
+  sliderContainer.appendChild(label);
+
+
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "remove-btn";
+  removeBtn.innerHTML = TRASH_SVG; // Use constant instead of inline
+  removeBtn.onclick = () => {
+    filters.splice(i, 1);
+    renderFilters();
+  };
+
+  controlsDiv.appendChild(sliderContainer);
+  controlsDiv.appendChild(removeBtn);
+  
+  li.appendChild(infoDiv);
+  li.appendChild(controlsDiv);
+  
+  return li;
 }
 
 

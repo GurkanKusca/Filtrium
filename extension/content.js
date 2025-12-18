@@ -5,16 +5,36 @@ const userAllowedMedia = new WeakSet();
 let userFilters = [];
 let isProcessing = false;
 
+// Cached theme to avoid recalculation
+let cachedTheme = null;
+let themeCheckTime = 0;
+const THEME_CACHE_MS = 10000; // Re-check theme every 10 seconds
+
+// Batch processing queue
+const mediaQueue = [];
+let batchTimeout = null;
+const BATCH_DELAY_MS = 50; // Process batch after 50ms of no new items
+
 
 function getThemeColor() {
+  const now = Date.now();
+  // Return cached theme if still valid
+  if (cachedTheme && (now - themeCheckTime) < THEME_CACHE_MS) {
+    return cachedTheme;
+  }
 
   const bgColor = getComputedStyle(document.body).backgroundColor;
   const rgb = bgColor.match(/\d+/g);
-  if (!rgb) return 'dark'; 
-  
+  if (!rgb) {
+    cachedTheme = 'dark';
+    themeCheckTime = now;
+    return cachedTheme;
+  }
 
   const brightness = (parseInt(rgb[0]) * 299 + parseInt(rgb[1]) * 587 + parseInt(rgb[2]) * 114) / 1000;
-  return brightness > 125 ? 'light' : 'dark';
+  cachedTheme = brightness > 125 ? 'light' : 'dark';
+  themeCheckTime = now;
+  return cachedTheme;
 }
 
 chrome.storage.local.get('userFilters', (result) => {
@@ -60,36 +80,61 @@ function init() {
 }
 
 function processMutations(mutations) {
-  const media = [];
-  
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       if (node.nodeType === 1) {
         if (node.tagName === 'IMG' && node.src && node.src.includes('twimg.com')) {
-          media.push({ element: node, type: 'image' });
+          queueMediaCheck(node, 'image');
         }
         if (node.tagName === 'VIDEO') {
-          media.push({ element: node, type: 'video' });
+          queueMediaCheck(node, 'video');
         }
         
-        const imgs = node.querySelectorAll?.('img[src*="twimg.com"]');
-        if (imgs) imgs.forEach(img => media.push({ element: img, type: 'image' }));
-        
-        const videos = node.querySelectorAll?.('video');
-        if (videos) videos.forEach(video => media.push({ element: video, type: 'video' }));
+        // Use combined selector for efficiency
+        const mediaElements = node.querySelectorAll?.('img[src*="twimg.com"], video');
+        if (mediaElements) {
+          mediaElements.forEach(el => {
+            queueMediaCheck(el, el.tagName === 'VIDEO' ? 'video' : 'image');
+          });
+        }
       }
     }
   }
+}
+
+// Queue media for batch processing
+function queueMediaCheck(element, type) {
+  if (processedMedia.has(element)) return;
   
-  media.forEach(({ element, type }) => checkMedia(element, type));
+  mediaQueue.push({ element, type });
+  
+  // Debounce: process batch after delay
+  if (batchTimeout) clearTimeout(batchTimeout);
+  batchTimeout = setTimeout(processBatch, BATCH_DELAY_MS);
+}
+
+// Process all queued media in batch
+async function processBatch() {
+  batchTimeout = null;
+  if (mediaQueue.length === 0) return;
+  
+  // Take all items from queue
+  const batch = mediaQueue.splice(0, mediaQueue.length);
+  
+  // Process in parallel with concurrency limit
+  const CONCURRENCY = 5;
+  for (let i = 0; i < batch.length; i += CONCURRENCY) {
+    const chunk = batch.slice(i, i + CONCURRENCY);
+    await Promise.all(chunk.map(({ element, type }) => checkMedia(element, type)));
+  }
 }
 
 function processAllMedia() {
-  const images = document.querySelectorAll('img[src*="twimg.com"]');
-  images.forEach(img => checkMedia(img, 'image'));
-  
-  const videos = document.querySelectorAll('video');
-  videos.forEach(video => checkMedia(video, 'video'));
+  // Combined selector for efficiency
+  const allMedia = document.querySelectorAll('img[src*="twimg.com"], video');
+  allMedia.forEach(el => {
+    queueMediaCheck(el, el.tagName === 'VIDEO' ? 'video' : 'image');
+  });
 }
 
 async function checkMedia(element, type) {
@@ -305,4 +350,22 @@ function applyModernOverlay(element, result) {
 
   parent.appendChild(overlay);
   parent.appendChild(hideBtn);
+}
+
+// Replace unbounded Map with size-limited cache
+class LRUCache {
+  constructor(maxSize = 500, ttl = 300000) { // 5min TTL
+    this.cache = new Map();
+    this.maxSize = maxSize;
+    this.ttl = ttl;
+  }
+  // ...implementation
+}
+
+let saveTimeout = null;
+function debouncedSave() {
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    chrome.storage.local.set(stats);
+  }, 5000);
 }

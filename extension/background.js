@@ -1,7 +1,69 @@
 console.log("🛡️ Twitter Filter: Background loaded (Images + Videos)");
 
-const cache = new Map();
+// LRU Cache with TTL for memory efficiency
+class LRUCache {
+  constructor(maxSize = 500, ttlMs = 300000) { // 500 items, 5 min TTL
+    this.maxSize = maxSize;
+    this.ttlMs = ttlMs;
+    this.cache = new Map();
+  }
+
+  has(key) {
+    if (!this.cache.has(key)) return false;
+    const entry = this.cache.get(key);
+    if (Date.now() > entry.expiry) {
+      this.cache.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  get(key) {
+    if (!this.has(key)) return undefined;
+    const entry = this.cache.get(key);
+    // Move to end (most recently used)
+    this.cache.delete(key);
+    this.cache.set(key, entry);
+    return entry.value;
+  }
+
+  set(key, value) {
+    // Remove if exists (to update position)
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    }
+    // Evict oldest if at capacity
+    if (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      this.cache.delete(oldestKey);
+    }
+    this.cache.set(key, {
+      value,
+      expiry: Date.now() + this.ttlMs
+    });
+  }
+
+  clear() {
+    this.cache.clear();
+  }
+}
+
+const cache = new LRUCache(500, 300000); // 500 items, 5 min TTL
 let stats = { imagesBlocked: 0, videosBlocked: 0, totalChecked: 0 };
+let saveTimeout = null;
+
+// Debounced storage save (every 5 seconds max)
+function debouncedSaveStats() {
+  if (saveTimeout) return;
+  saveTimeout = setTimeout(() => {
+    chrome.storage.local.set({
+      imagesBlocked: stats.imagesBlocked,
+      videosBlocked: stats.videosBlocked,
+      totalChecked: stats.totalChecked
+    });
+    saveTimeout = null;
+  }, 5000);
+}
 
 chrome.storage.local.get(['imagesBlocked', 'videosBlocked', 'totalChecked'], (result) => {
   stats.imagesBlocked = result.imagesBlocked || 0;
@@ -75,11 +137,8 @@ async function handleCheck(url, userFilters, type) {
       else stats.imagesBlocked++;
     }
     
-    chrome.storage.local.set({
-      imagesBlocked: stats.imagesBlocked,
-      videosBlocked: stats.videosBlocked,
-      totalChecked: stats.totalChecked
-    });
+    // Debounced save instead of immediate write
+    debouncedSaveStats();
 
     if (result.should_block) {
       console.log(`BLOCKED ${type}: ${result.reason}`);
